@@ -1,0 +1,90 @@
+# usamos la version 2 para el archivo docker-compose
+version: '2'
+
+# aqui es donde se configura cada contenedor
+services:
+  # contenedor db mysql
+  mysql:
+    # especifica la imagen que voy a usar para hacer build del contenedor
+    image: mysql:latest
+    # asigna un nombre al contenedor
+    container_name: mysql
+    # usamos el contenedor de datos con nombre mysql creado al final para persistir los datos de la db que se genera en el contenedor
+    volumes:
+      - mysql:/data
+    # setea las variables de entorno para mysql
+    env_file: .env
+
+  # contenedor redis
+  redis:
+    # especifica la imagen que voy a usar para hacer build del contenedor
+    image: redis:alpine
+    # asigna un nombre al contenedor
+    container_name: redis
+    # usamos el contenedor de datos con nombre redis creado al final para persistir los datos de la db que se genera en el contenedor
+    volumes:
+      - redis:/data
+
+  # contenedor elasticsearch
+  elasticsearch:
+      image: elasticsearch:2.4.4
+      container_name: elasticsearch
+      # mapeamos los puertos 9200 y 9300 del contenedor al mi host
+      ports:
+        - "9200:9200"
+        - "9300:9300"
+      volumes:
+        - elasticsearch:/usr/share/elasticsearch/data
+
+  # contenedor mailcatcher (ejecuta un servidor SMTP que captura cualquier mensaje de tu app mostrandolo en una interfaz web)
+  mailcatcher:
+    image: tophfr/mailcatcher
+    container_name: mailcatcher
+    # setea las variables de entorno para configurar mailcatcher
+    env_file: .env
+    # setea los puertos de mailcatcher 1080 y 1025 desde el contenedor al host
+    ports:
+      - 1080:1080
+      - 1025:1025
+
+  # contenedor php con composer incluido
+  php:
+    build:
+      context: ./docker/php7-fpm
+    image: laravel:php-fpm
+    container_name: php
+    # especifica el orden de ejecucion de los contenedores en este caso php depende de contenedor redis, elsticsearch y mysql
+    # por lo tanto no se va a ejecutar el contenedor php hasta que elasticsearch y mysql se hayan ejecutado
+    depends_on:
+      - redis
+      - elasticsearch
+      - mysql
+    # una vez creado el contenedor php se ejecuta estos comandos de bash
+    command: bash -c "sh crontab-install.sh && php-fpm"
+    # configura las variables de entornos para la configuracion de los contenedores
+    env_file: .env
+
+    volumes:
+      - ./app/:/var/www/html:rw
+
+  # contenedor nginx
+  web:
+    image: nginx:alpine
+    container_name: nginx
+    depends_on:
+      - php
+    # ocupa el volumes del contenedor php de arriba
+    volumes_from:
+      - php
+    # comparte el archivo default con la congifuracion de nginx de mi host al contenedor en la ubicacion  /etc/nginx/conf.d/default.conf
+    # este archivo tiene configurado nginx para usar el contenedor php-fpm para interpretar los archivos php
+    volumes:
+      - ./docker/nginx/default:/etc/nginx/conf.d/default.conf
+    ports:
+      - 80:80
+
+# creamos un contenedor de datos para redis, elasticsearch y mysql para persistir la data de cada uno
+volumes:
+  redis: {}
+  elasticsearch: {}
+  mysql: {}
